@@ -112,9 +112,20 @@ If your OpenCode version uses `command` + `args` as separate
 fields instead of a single command list, split them the same way:
 command `python3`, args as above. After connecting, OpenCode sees
 these tools: `browser_open`, `browser_read`, `browser_click`,
+`browser_list_elements`, `browser_click_xy`, `browser_wait`,
 `browser_type`, `browser_scroll`, `browser_navigate`,
 `browser_screenshot`, `browser_takeover`, `browser_handback`,
 `browser_watch`.
+
+### Live preview: full screen
+
+The preview page is responsive (phone and desktop). Click
+**⛶ Plein écran** above the screenshot for a full-screen live
+preview (Esc exits). Clicking the screenshot in full screen still
+forwards the click to the real browser, with coordinates corrected
+for the full-screen scaling. Long URLs in the watch log are
+truncated on screen (full URL in the tooltip) so they no longer
+break the page layout.
 
 ## Takeover / hand-back flow (for the OpenCode user)
 
@@ -155,11 +166,27 @@ browser with shell commands, and do not reload a page to "reset" it.
   when the task explicitly asks for a different site. It is not a
   refresh button.
 - `browser_read()` — read the current URL, title and page text.
-  Use it after every navigation, click and hand-back, before you
-  decide the next step.
+  It now also lists clickable elements (first 30). Use it after
+  every navigation, click and hand-back, before you decide the
+  next step.
+- `browser_list_elements()` — list visible links, buttons and
+  inputs with a selector per element. **Call this before clicking,
+  instead of guessing text or selectors from page text alone.**
+  This is the fix for weak control: the agent was blind before,
+  it now sees what it can actually click. Always runs, even while
+  the user drives.
 - `browser_click(text_or_selector)` — click a visible link/button
-  by its text, or an element by CSS selector. Click one thing, then
-  read again. Do not click the same thing twice because a page was
+  by its text, or an element by CSS selector, preferably a selector
+  taken from `browser_list_elements`. Click one thing, then read
+  again. Do not click the same thing twice because a page was
+  slow.
+- `browser_click_xy(x, y)` — click by screenshot coordinates
+  (1280x720 viewport). Use it ONLY after a screenshot, with
+  coordinates from that screenshot, and only when no selector from
+  `browser_list_elements` fits.
+- `browser_wait(seconds, text)` — wait up to 5 seconds, optionally
+  until given text appears. Use it after a navigation or a click,
+  before reading again, instead of re-clicking because a page was
   slow.
 - `browser_type(field, text)` — type into a labelled field. Never
   type into a password, payment, code, token or secret field: the
@@ -219,8 +246,10 @@ The preview badge flips to `USER DRIVING`. From that moment:
 
 1. `browser_open("https://example.com")` → tell the user the
    preview URL.
-2. `browser_read()` → find the link you need.
-3. `browser_click("More information")` → `browser_read()` again.
+2. `browser_list_elements()` → find the link you need and its
+   selector (do not guess it from text alone).
+3. `browser_click(selector)` → `browser_wait(2)` →
+   `browser_read()` again.
 4. User clicks Take control → you stop actions, you watch.
 5. User drives to a new page and clicks Hand back to agent.
 6. `browser_handback()` → read the summary and `browser_watch()`.

@@ -106,6 +106,24 @@ class FakeDriver:
         self.calls.append(("click_xy", x, y))
         return self.url
 
+    def list_elements(self):
+        """Visible clickable/input elements, as the agent should see them.
+
+        FakeDriver has no real DOM, so it returns a small deterministic
+        list derived from the current page: a link onward from the
+        page, plus a generic button. Real pages must use
+        PlaywrightDriver, which reads the live DOM.
+        """
+        self.calls.append(("list_elements",))
+        if not self.url:
+            return []
+        return [
+            {"index": 0, "tag": "a", "text": "More information",
+             "selector": "text=More information"},
+            {"index": 1, "tag": "button", "text": "Submit",
+             "selector": "button"},
+        ]
+
     def type_text(self, field, value):
         self.calls.append(("type_text", field, value))
         return "typed"
@@ -179,6 +197,38 @@ class PlaywrightDriver:
     def click_xy(self, x, y):
         self._page.mouse.click(float(x), float(y))
         return self._page.url
+
+    def list_elements(self):
+        """Visible links, buttons and inputs, with a selector per element.
+
+        This is what makes the agent's control strong instead of blind:
+        it no longer has to guess text or selectors from page text
+        alone. Returns at most 100 elements, in DOM order.
+        """
+        try:
+            return self._page.evaluate("""() => {
+                const els = Array.from(document.querySelectorAll(
+                    'a, button, input, select, textarea, [role="button"]'));
+                const seen = new Set();
+                return els.filter(el => {
+                    const r = el.getBoundingClientRect();
+                    return r.width > 0 && r.height > 0;
+                }).slice(0, 100).map((el, i) => {
+                    const text = (el.innerText || el.value || el.getAttribute('aria-label') || '').trim().slice(0, 80);
+                    let selector = '';
+                    if (el.id) selector = '#' + el.id;
+                    else if (text && (el.tagName === 'A' || el.tagName === 'BUTTON')) selector = 'text=' + text;
+                    else selector = el.tagName.toLowerCase();
+                    if (seen.has(selector)) selector = selector + ':nth-of-type(' + (i + 1) + ')';
+                    seen.add(selector);
+                    return {index: i, tag: el.tagName.toLowerCase(), text: text,
+                            name: el.getAttribute('name') || '',
+                            type: el.getAttribute('type') || '',
+                            selector: selector};
+                });
+            }""")
+        except Exception:
+            return []
 
     def type_text(self, field, value):
         # field is a label or selector; try label first, then locator.

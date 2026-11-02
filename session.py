@@ -286,6 +286,17 @@ class BrowserSession:
             return "opened %s title=%r" % (self.url, self.title)
         return self._agent_or_queue("browser_open", {"url": url}, run)
 
+    def list_elements(self):
+        """Visible clickable/input elements. A read: always runs, even
+        while the user drives. This is the agent's eyes for control:
+        list elements BEFORE clicking, instead of guessing text."""
+        self._refresh_state()
+        try:
+            elements = self._run(lambda d: d.list_elements()) or []
+        except Exception:
+            elements = []
+        return elements
+
     def read(self):
         # Reads are safe while the user drives: they never change the page.
         self._refresh_state()
@@ -293,12 +304,54 @@ class BrowserSession:
             text = self._run(lambda d: d.get_text()) or ""
         except Exception:
             text = ""
-        return "title: %s\nurl: %s\n%s" % (self.title, self.url, text[:4000])
+        out = "title: %s\nurl: %s\n%s" % (self.title, self.url, text[:4000])
+        try:
+            elements = self.list_elements()
+        except Exception:
+            elements = []
+        if elements:
+            lines = ["\nclickable elements (use browser_list_elements for the full list):"]
+            for e in elements[:30]:
+                lines.append("  [%s] %s %r selector=%r" % (
+                    e.get("index", ""), e.get("tag", ""),
+                    (e.get("text") or e.get("name") or "")[:80],
+                    e.get("selector", "")))
+            out += "\n".join(lines)
+        return out
 
-    def click(self, text="", selector=""):
+    def wait(self, seconds=1, text=""):
+        """Wait up to 5 seconds, optionally until text appears.
+
+        A read-like action: it does not change the page, so it runs
+        even while the user drives. Use it after navigation or a
+        click, before reading again, instead of guessing that a page
+        has loaded.
+        """
+        try:
+            seconds = min(max(float(seconds or 1), 0), 5)
+        except Exception:
+            seconds = 1
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            if text:
+                try:
+                    current = self._run(lambda d: d.get_text()) or ""
+                except Exception:
+                    current = ""
+                if text in current:
+                    break
+            time.sleep(0.25)
+        self._refresh_state()
+        return "waited, now %s title=%r" % (self.url, self.title)
+
+    def click(self, text="", selector="", x=None, y=None):
         def run():
             before = self.url
-            if selector:
+            if x is not None and y is not None:
+                self._run(lambda d: d.click_xy(x, y))
+                via = "agent click (%s,%s)" % (x, y)
+                sel = ""
+            elif selector:
                 self._run(lambda d: d.click_selector(selector))
                 via = "agent click (%s)" % selector
                 sel = selector
@@ -310,7 +363,13 @@ class BrowserSession:
             self._record("click", before, self.url, selector=sel,
                          text=text if not selector else "", via=via)
             return "clicked, now %s title=%r" % (self.url, self.title)
-        return self._agent_or_queue("browser_click", {"text": text, "selector": selector}, run)
+        return self._agent_or_queue(
+            "browser_click", {"text": text, "selector": selector, "x": x, "y": y}, run)
+
+    def click_xy(self, x, y):
+        """Agent coordinate click: only after a screenshot, and only
+        with coordinates taken from that screenshot (1280x720)."""
+        return self.click(x=x, y=y)
 
     def type_text(self, field, value):
         if is_secret_field(field):
@@ -478,7 +537,12 @@ class BrowserSession:
                 if method == "browser_open":
                     out = self.open(args.get("url", ""))
                 elif method == "browser_click":
-                    out = self.click(text=args.get("text", ""), selector=args.get("selector", ""))
+                    out = self.click(text=args.get("text", ""), selector=args.get("selector", ""),
+                                     x=args.get("x"), y=args.get("y"))
+                elif method == "browser_wait":
+                    out = self.wait(seconds=args.get("seconds", 1), text=args.get("text", ""))
+                elif method == "browser_list_elements":
+                    out = "elements: %s" % (self.list_elements(),)
                 elif method == "browser_type":
                     out = self.type_text(args.get("field", ""), args.get("value", ""))
                 elif method == "browser_scroll":

@@ -29,10 +29,20 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PAGE_HTML = """<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Shadowcode browser preview</title>
-<style>body{font-family:system-ui,sans-serif;max-width:1100px;margin:1em auto}
-#drv{font-size:1.2em} img{max-width:100%;border:1px solid #888;cursor:crosshair}
-input{margin:2px} button{margin:2px} #watch{font-size:.9em}</style></head><body>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Shadowcode browser preview</title>
+<style>html,body{margin:0;padding:0;box-sizing:border-box}*{box-sizing:border-box}
+body{font-family:system-ui,sans-serif;margin:0;padding:8px;overflow-wrap:anywhere}
+#controls{position:sticky;top:0;background:#fff;padding:8px 0;z-index:10}
+#drv{font-size:1.2em;margin:0 0 4px} #info{margin:4px 0;overflow-wrap:anywhere}
+#shotwrap{background:#000;line-height:0}
+#shotwrap img{width:100%;height:auto;display:block;border:1px solid #888;cursor:crosshair;background:#000}
+#shotwrap:fullscreen{background:#000}
+#shotwrap:fullscreen img{width:100vw;height:100vh;object-fit:contain;border:none}
+#shotwrap:-webkit-full-screen{background:#000}
+#shotwrap:-webkit-full-screen img{width:100vw;height:100vh;object-fit:contain;border:none}
+input{margin:2px;max-width:100%} button{margin:2px} #watch{font-size:.9em;overflow-wrap:anywhere;word-break:break-all}
+#watch li{margin-bottom:4px} #summary pre{white-space:pre-wrap;overflow-wrap:anywhere}</style></head><body>
+<div id="controls">
 <h2 id="drv">AGENT DRIVING</h2>
 <p id="info"></p>
 <p id="queued"></p>
@@ -41,29 +51,35 @@ input{margin:2px} button{margin:2px} #watch{font-size:.9em}</style></head><body>
 <button onclick="post('/control',{action:'back'})">Back</button>
 <button onclick="post('/control',{action:'forward'})">Forward</button>
 <button onclick="post('/control',{action:'scroll',direction:'down',amount:600})">Scroll down</button>
-<button onclick="post('/control',{action:'scroll',direction:'up',amount:600})">Scroll up</button><br>
+<button onclick="post('/control',{action:'scroll',direction:'up',amount:600})">Scroll up</button>
+<button onclick="toggleFullscreen()">⛶ Plein écran</button><br>
 <input id="url" placeholder="https://..." style="width:60%"><button onclick="goUrl()">Go</button><br>
 <input id="field" placeholder="field label / selector (optional)"><input id="keys" placeholder="type text here"><button onclick="sendKeys()">Send keys</button><br>
 <input id="scrollto" placeholder="scroll to: selector or text=..." style="width:40%"><button onclick="scrollToEl()">Scroll to</button>
 <input id="clicktext" placeholder="click text: visible link text" style="width:40%"><button onclick="clickText()">Click text</button>
-<input id="clickselector" placeholder="click selector: CSS selector" style="width:40%"><button onclick="clickSelector()">Click selector</button><br>
-<img id="shot" src="/shot.png" onclick="clickShot(event)" alt="live browser screenshot">
+<input id="clickselector" placeholder="click selector: CSS selector" style="width:40%"><button onclick="clickSelector()">Click selector</button>
+</div>
+<div id="shotwrap"><img id="shot" src="/shot.png" onclick="clickShot(event)" alt="live browser screenshot"></div>
 <p>Watch log (what the agent records while you drive):</p><ul id="watch"></ul>
 <div id="summary"></div>
 <p><small>Hand back to agent resumes from the current page exactly -- no reload, no reset.
 Clicking the screenshot forwards the click to the real browser. Agent actions taken
-while you drive are queued, not lost, and run on hand-back.</small></p>
+while you drive are queued, not lost, and run on hand-back. Use Plein écran for a
+full-screen live preview; Esc exits fullscreen.</small></p>
 <script>
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function short(u){u=String(u||'');return u.length>80?u.slice(0,77)+'...':u;}
 async function tick(){let r=await fetch('/state.json');let s=await r.json();
 document.getElementById('info').textContent=s.title+' -- '+s.url;
 document.getElementById('drv').textContent=s.driver==='user'?'USER DRIVING':'AGENT DRIVING';
 document.getElementById('queued').textContent='Queued agent actions: '+(s.queued_agent_actions||0);
-document.getElementById('watch').innerHTML=(s.watch||[]).map(e=>'<li>'+e.ts+' '+e.action+' '+e.url_before+' -&gt; '+e.url_after+' ('+e.driver+')'+(e.via?' via '+e.via:'')+'</li>').join('');
+document.getElementById('watch').innerHTML=(s.watch||[]).map(e=>'<li title="'+esc(e.url_after)+'">'+esc(e.ts)+' '+esc(e.action)+' '+esc(short(e.url_before))+' -&gt; '+esc(short(e.url_after))+' ('+esc(e.driver)+')'+(e.via?' via '+esc(e.via):'')+'</li>').join('');
 let img=document.getElementById('shot'); img.src='/shot.png?'+Date.now();}
 async function post(path,o){let r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(o)});let t=await r.text();
 if(path==='/handback'){document.getElementById('summary').innerHTML='<pre>'+t.replace(/</g,'&lt;')+'</pre>';}
 tick();}
-function clickShot(e){let img=e.target;let x=Math.round(e.offsetX/img.clientWidth*1280);let y=Math.round(e.offsetY/img.clientHeight*720);post('/control',{action:'click_xy',x:x,y:y});}
+function toggleFullscreen(){let w=document.getElementById('shotwrap');if(document.fullscreenElement){document.exitFullscreen();}else if(w.requestFullscreen){w.requestFullscreen();}else if(w.webkitRequestFullscreen){w.webkitRequestFullscreen();}}
+function clickShot(e){let img=e.target;let rect=img.getBoundingClientRect();let scale=Math.min(rect.width/1280,rect.height/720);let dw=1280*scale,dh=720*scale;let ox=rect.left+(rect.width-dw)/2,oy=rect.top+(rect.height-dh)/2;let x=Math.round((e.clientX-ox)/scale),y=Math.round((e.clientY-oy)/scale);x=Math.max(0,Math.min(1280,x));y=Math.max(0,Math.min(720,y));post('/control',{action:'click_xy',x:x,y:y});}
 function sendKeys(){post('/control',{action:'type',field:document.getElementById('field').value,text:document.getElementById('keys').value});}
 function scrollToEl(){post('/control',{action:'scroll_to',selector:document.getElementById('scrollto').value});}
 function clickText(){post('/control',{action:'click_text',text:document.getElementById('clicktext').value});}

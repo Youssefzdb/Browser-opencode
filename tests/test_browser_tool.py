@@ -213,5 +213,56 @@ class TestMCPServer(unittest.TestCase):
             self.assertTrue(resp["result"]["isError"])
 
 
+class TestAgentControl(unittest.TestCase):
+    def test_list_elements_and_read_includes_them(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            s = make_session(tmp)
+            s.open("https://example.com")
+            elements = s.list_elements()
+            self.assertTrue(elements)
+            self.assertIn("selector", elements[0])
+            self.assertIn("clickable elements", s.read())
+
+    def test_agent_click_xy_and_wait(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            s = make_session(tmp)
+            s.open("https://example.com")
+            out = s.click_xy(100, 200)
+            self.assertIn("clicked", out)
+            self.assertIn("click_xy", [c[0] for c in s._driver.calls])
+            self.assertIn("now", s.wait(seconds=0.1, text="Content"))
+
+    def test_mcp_new_tools_listed_and_callable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            srv = MCPBrowserServer(tmp, fake=True)
+            resp = srv.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+            names = [t["name"] for t in resp["result"]["tools"]]
+            for required in ("browser_list_elements", "browser_click_xy", "browser_wait"):
+                self.assertIn(required, names)
+
+            def call(name, args=None):
+                resp = srv.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                                   "params": {"name": name, "arguments": args or {}}})
+                self.assertFalse(resp["result"]["isError"], resp)
+                return resp["result"]["content"][0]["text"]
+            call("browser_open", {"url": "https://example.com"})
+            self.assertIn("selector", call("browser_list_elements"))
+            self.assertIn("clicked", call("browser_click_xy", {"x": 10, "y": 20}))
+            self.assertIn("waited", call("browser_wait", {"seconds": 0.1}))
+            srv.close()
+
+    def test_preview_has_fullscreen_button(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            s = make_session(tmp)
+            server, url = start_preview(s, start_port=8795)
+            try:
+                html = urllib.request.urlopen(url, timeout=5).read().decode()
+                self.assertIn("Plein écran", html)
+                self.assertIn("requestFullscreen", html)
+                self.assertIn("shotwrap", html)
+            finally:
+                server.shutdown(); server.server_close()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

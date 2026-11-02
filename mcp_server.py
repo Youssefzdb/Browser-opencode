@@ -11,8 +11,11 @@ Tools exposed (at least the set the task requires, plus a selector
 variant of click, which OpenCode clients commonly need):
 
   browser_open       {url}
-  browser_read       {}
-  browser_click      {text} | {selector}
+  browser_read       {}  (now also lists clickable elements)
+  browser_click      {text} | {selector} | {x, y}
+  browser_list_elements {}
+  browser_click_xy   {x, y}
+  browser_wait       {seconds, text}
   browser_type       {field, text}
   browser_scroll     {direction, amount, selector}
   browser_navigate   {direction: "back" | "forward"}
@@ -68,6 +71,12 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {}}},
     {"name": "browser_click", "description": "Click visible text, or a CSS selector when 'selector' is given.",
      "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}, "selector": {"type": "string"}}}},
+    {"name": "browser_list_elements", "description": "List visible links, buttons and inputs with a selector per element. Call this BEFORE clicking, instead of guessing text or selectors from page text alone. Always runs, even while the user drives.",
+     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "browser_click_xy", "description": "Click by screenshot coordinates (1280x720 viewport) taken from the latest screenshot. Use only after browser_screenshot / preview, and prefer browser_list_elements + browser_click when a selector exists.",
+     "inputSchema": {"type": "object", "properties": {"x": {"type": "number"}, "y": {"type": "number"}}, "required": ["x", "y"]}},
+    {"name": "browser_wait", "description": "Wait up to 5 seconds, optionally until given text appears on the page. Use after navigation or a click before reading again.",
+     "inputSchema": {"type": "object", "properties": {"seconds": {"type": "number"}, "text": {"type": "string"}}}},
     {"name": "browser_type", "description": "Type text into a field (label or selector). Secret-looking fields are refused.",
      "inputSchema": {"type": "object", "properties": {"field": {"type": "string"}, "text": {"type": "string"}}, "required": ["text"]}},
     {"name": "browser_scroll", "description": "Scroll down/up/top/bottom, or scroll a selector into view.",
@@ -116,8 +125,25 @@ class MCPBrowserServer:
         if name == "browser_read":
             return s.read()
         if name == "browser_click":
-            out = s.click(text=args.get("text", ""), selector=args.get("selector", ""))
+            out = s.click(text=args.get("text", ""), selector=args.get("selector", ""),
+                          x=args.get("x"), y=args.get("y"))
             return out if isinstance(out, str) else json.dumps(out)
+        if name == "browser_list_elements":
+            elements = s.list_elements()
+            if not elements:
+                return "no clickable elements found on the current page"
+            lines = ["clickable elements:"]
+            for e in elements:
+                lines.append("  [%s] %s %r selector=%r" % (
+                    e.get("index", ""), e.get("tag", ""),
+                    (e.get("text") or e.get("name") or "")[:80],
+                    e.get("selector", "")))
+            return "\n".join(lines)
+        if name == "browser_click_xy":
+            out = s.click_xy(args.get("x"), args.get("y"))
+            return out if isinstance(out, str) else json.dumps(out)
+        if name == "browser_wait":
+            return s.wait(seconds=args.get("seconds", 1), text=args.get("text", ""))
         if name == "browser_type":
             out = s.type_text(args.get("field", ""), args.get("text", ""))
             return out if isinstance(out, str) else json.dumps(out)
@@ -150,7 +176,7 @@ class MCPBrowserServer:
             return {"jsonrpc": "2.0", "id": rid, "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "shadowcode-browser", "version": "0.1.0"},
+                "serverInfo": {"name": "shadowcode-browser", "version": "0.2.0"},
             }}
         if method in ("notifications/initialized", "notifications/cancelled"):
             return None

@@ -112,12 +112,12 @@ If your OpenCode version uses `command` + `args` as separate
 fields instead of a single command list, split them the same way:
 command `python3`, args as above. After connecting, OpenCode sees
 these tools: `browser_open`, `browser_read`, `browser_click`,
-`browser_list_elements`, `browser_click_xy`, `browser_wait`,
+`browser_list_elements`, `browser_click_xy`, `browser_mouse_move`, `browser_wait`,
 `browser_type`, `browser_scroll`, `browser_navigate`,
 `browser_screenshot`, `browser_takeover`, `browser_handback`,
 `browser_watch`.
 
-### Live preview: full screen
+### Live preview: full screen, visible mouse cursor
 
 The preview page is responsive (phone and desktop). Click
 **⛶ Plein écran** above the screenshot for a full-screen live
@@ -126,6 +126,16 @@ forwards the click to the real browser, with coordinates corrected
 for the full-screen scaling. Long URLs in the watch log are
 truncated on screen (full URL in the tooltip) so they no longer
 break the page layout.
+
+The mouse cursor is now visible in the preview: a white arrow
+overlay on the screenshot, at the agent's last click/move position
+(1280x720 coordinates, scaled to the displayed screenshot, also in
+full screen). Playwright screenshots do not capture the OS cursor,
+so the session tracks the position and the preview draws it.
+Moving your own mouse over the screenshot shows your cursor too,
+without flipping the driver or flooding the watch log — only a
+real click, key, scroll or navigation from the preview takes
+control.
 
 ## Takeover / hand-back flow (for the OpenCode user)
 
@@ -184,6 +194,9 @@ browser with shell commands, and do not reload a page to "reset" it.
   (1280x720 viewport). Use it ONLY after a screenshot, with
   coordinates from that screenshot, and only when no selector from
   `browser_list_elements` fits.
+- `browser_mouse_move(x, y)` — move the mouse without clicking.
+  The preview shows this as a visible cursor, so move to the
+  target first when the user is watching, then click it.
 - `browser_wait(seconds, text)` — wait up to 5 seconds, optionally
   until given text appears. Use it after a navigation or a click,
   before reading again, instead of re-clicking because a page was

@@ -106,6 +106,12 @@ class FakeDriver:
         self.calls.append(("click_xy", x, y))
         return self.url
 
+    def mouse_move(self, x, y):
+        """Move the mouse without clicking. The preview draws this
+        position as a visible cursor over the screenshot."""
+        self.calls.append(("mouse_move", x, y))
+        return self.url
+
     def list_elements(self):
         """Visible clickable/input elements, as the agent should see them.
 
@@ -196,6 +202,13 @@ class PlaywrightDriver:
 
     def click_xy(self, x, y):
         self._page.mouse.click(float(x), float(y))
+        return self._page.url
+
+    def mouse_move(self, x, y):
+        # Playwright screenshots do not capture the OS cursor, so the
+        # session tracks this position and the preview draws it as an
+        # overlay cursor over the screenshot (see preview.py).
+        self._page.mouse.move(float(x), float(y))
         return self._page.url
 
     def list_elements(self):

@@ -91,6 +91,11 @@ class BrowserSession:
         self.driver_mode = "agent"  # "agent" | "user"
         self.url = ""
         self.title = ""
+        # Last known mouse position in 1280x720 viewport coordinates.
+        # None until the first click/move: the preview then shows no
+        # cursor overlay, instead of a fake cursor at (0, 0).
+        self.mouse_x = None
+        self.mouse_y = None
         self._shot = None
         self.watch_log = []          # in-memory entries, capped
         self._queued_agent = []      # [(method, args)] while user drives
@@ -221,6 +226,8 @@ class BrowserSession:
             "url": self.url,
             "title": self.title,
             "driver": self.driver_mode,
+            "mouse_x": self.mouse_x,
+            "mouse_y": self.mouse_y,
             "has_screenshot": self._shot is not None,
             "watch": watch_tail,
             "watch_count": len(self.watch_log),
@@ -348,6 +355,7 @@ class BrowserSession:
         def run():
             before = self.url
             if x is not None and y is not None:
+                self.mouse_x, self.mouse_y = x, y
                 self._run(lambda d: d.click_xy(x, y))
                 via = "agent click (%s,%s)" % (x, y)
                 sel = ""
@@ -370,6 +378,33 @@ class BrowserSession:
         """Agent coordinate click: only after a screenshot, and only
         with coordinates taken from that screenshot (1280x720)."""
         return self.click(x=x, y=y)
+
+    def set_mouse(self, x, y):
+        """Update the tracked mouse position without logging it.
+
+        Used by the preview for the user's own mouse moves over the
+        screenshot: recording every move would flood the watch log.
+        Agent moves go through mouse_move() instead, so they queue
+        while the user drives and are recorded like other actions.
+        """
+        try:
+            self.mouse_x, self.mouse_y = int(x), int(y)
+        except Exception:
+            pass
+        return "mouse at (%s, %s)" % (self.mouse_x, self.mouse_y)
+
+    def mouse_move(self, x, y):
+        """Agent mouse move without a click, so the user watching the
+        preview sees where the agent is pointing before it clicks."""
+        def run():
+            before = self.url
+            self.mouse_x, self.mouse_y = x, y
+            self._run(lambda d: d.mouse_move(x, y))
+            self._refresh_state()
+            self._record("mouse_move", before, self.url,
+                         text="(%s,%s)" % (x, y), via="agent mouse move")
+            return "mouse moved to (%s, %s), now %s" % (x, y, self.url)
+        return self._agent_or_queue("browser_mouse_move", {"x": x, "y": y}, run)
 
     def type_text(self, field, value):
         if is_secret_field(field):
@@ -444,8 +479,13 @@ class BrowserSession:
         """
         before = self.url
         if action == "click_xy":
+            self.mouse_x, self.mouse_y = kwargs.get("x", 0), kwargs.get("y", 0)
             self._run(lambda d: d.click_xy(kwargs.get("x", 0), kwargs.get("y", 0)))
             via, sel, txt = "preview click (%s,%s)" % (kwargs.get("x"), kwargs.get("y")), "", ""
+        elif action == "mouse_move":
+            # Preview mouse moves: track only, do not flood the watch log.
+            self.set_mouse(kwargs.get("x", 0), kwargs.get("y", 0))
+            return "mouse at (%s, %s)" % (self.mouse_x, self.mouse_y)
         elif action == "click_text":
             text = str(kwargs.get("text", ""))
             self._run(lambda d: d.click_text(text))
@@ -541,6 +581,8 @@ class BrowserSession:
                                      x=args.get("x"), y=args.get("y"))
                 elif method == "browser_wait":
                     out = self.wait(seconds=args.get("seconds", 1), text=args.get("text", ""))
+                elif method == "browser_mouse_move":
+                    out = self.mouse_move(args.get("x"), args.get("y"))
                 elif method == "browser_list_elements":
                     out = "elements: %s" % (self.list_elements(),)
                 elif method == "browser_type":

@@ -34,8 +34,10 @@ PAGE_HTML = """<!DOCTYPE html>
 body{font-family:system-ui,sans-serif;margin:0;padding:8px;overflow-wrap:anywhere}
 #controls{position:sticky;top:0;background:#fff;padding:8px 0;z-index:10}
 #drv{font-size:1.2em;margin:0 0 4px} #info{margin:4px 0;overflow-wrap:anywhere}
-#shotwrap{background:#000;line-height:0}
+#shotwrap{position:relative;background:#000;line-height:0}
 #shotwrap img{width:100%;height:auto;display:block;border:1px solid #888;cursor:crosshair;background:#000}
+#cursor{position:absolute;left:0;top:0;width:28px;height:28px;pointer-events:none;display:none;z-index:20;filter:drop-shadow(1px 1px 1px #000)}
+#cursor svg{width:28px;height:28px}
 #shotwrap:fullscreen{background:#000}
 #shotwrap:fullscreen img{width:100vw;height:100vh;object-fit:contain;border:none}
 #shotwrap:-webkit-full-screen{background:#000}
@@ -59,7 +61,7 @@ input{margin:2px;max-width:100%} button{margin:2px} #watch{font-size:.9em;overfl
 <input id="clicktext" placeholder="click text: visible link text" style="width:40%"><button onclick="clickText()">Click text</button>
 <input id="clickselector" placeholder="click selector: CSS selector" style="width:40%"><button onclick="clickSelector()">Click selector</button>
 </div>
-<div id="shotwrap"><img id="shot" src="/shot.png" onclick="clickShot(event)" alt="live browser screenshot"></div>
+<div id="shotwrap"><img id="shot" src="/shot.png" onclick="clickShot(event)" onmousemove="moveCursor(event)" alt="live browser screenshot"><div id="cursor"><svg viewBox="0 0 28 28"><path d="M4 2 L4 22 L10 16 L14 24 L17 22 L13 15 L21 15 Z" fill="#fff" stroke="#000" stroke-width="1.5"/></svg></div></div>
 <p>Watch log (what the agent records while you drive):</p><ul id="watch"></ul>
 <div id="summary"></div>
 <p><small>Hand back to agent resumes from the current page exactly -- no reload, no reset.
@@ -69,10 +71,16 @@ full-screen live preview; Esc exits fullscreen.</small></p>
 <script>
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function short(u){u=String(u||'');return u.length>80?u.slice(0,77)+'...':u;}
+function shotPos(img,x,y){let rect=img.getBoundingClientRect();let scale=Math.min(rect.width/1280,rect.height/720);let dw=1280*scale,dh=720*scale;return {left:rect.left+(rect.width-dw)/2+x*scale,top:rect.top+(rect.height-dh)/2+y*scale,scale:scale};}
+function placeCursor(x,y){let img=document.getElementById('shot');let cur=document.getElementById('cursor');if(x===null||x===undefined||y===null||y===undefined){cur.style.display='none';return;}let p=shotPos(img,x,y);let wrap=document.getElementById('shotwrap').getBoundingClientRect();cur.style.display='block';cur.style.left=(p.left-wrap.left)+'px';cur.style.top=(p.top-wrap.top)+'px';}
+function viewportXY(e){let img=e.target;let rect=img.getBoundingClientRect();let scale=Math.min(rect.width/1280,rect.height/720);let dw=1280*scale,dh=720*scale;let ox=rect.left+(rect.width-dw)/2,oy=rect.top+(rect.height-dh)/2;return {x:Math.max(0,Math.min(1280,Math.round((e.clientX-ox)/scale))),y:Math.max(0,Math.min(720,Math.round((e.clientY-oy)/scale)))};}
+let lastMousePost=0;
+function moveCursor(e){let p=viewportXY(e);placeCursor(p.x,p.y);let now=Date.now();if(now-lastMousePost>500){lastMousePost=now;fetch('/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'mouse_move',x:p.x,y:p.y})});}}
 async function tick(){let r=await fetch('/state.json');let s=await r.json();
 document.getElementById('info').textContent=s.title+' -- '+s.url;
 document.getElementById('drv').textContent=s.driver==='user'?'USER DRIVING':'AGENT DRIVING';
 document.getElementById('queued').textContent='Queued agent actions: '+(s.queued_agent_actions||0);
+placeCursor(s.mouse_x,s.mouse_y);
 document.getElementById('watch').innerHTML=(s.watch||[]).map(e=>'<li title="'+esc(e.url_after)+'">'+esc(e.ts)+' '+esc(e.action)+' '+esc(short(e.url_before))+' -&gt; '+esc(short(e.url_after))+' ('+esc(e.driver)+')'+(e.via?' via '+esc(e.via):'')+'</li>').join('');
 let img=document.getElementById('shot'); img.src='/shot.png?'+Date.now();}
 async function post(path,o){let r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(o)});let t=await r.text();
@@ -161,8 +169,11 @@ def start_preview(session, start_port=8766):
                            if isinstance(summary, dict) else str(summary))
             elif self.path == "/control":
                 data = self._read_json()
-                # Any control from the preview means the user is driving.
-                if session_ref.driver_mode != "user":
+                # Any real control from the preview means the user is
+                # driving -- except a mouse move, which only tracks
+                # the cursor for the overlay and must not flip the
+                # driver just because the user hovered the screenshot.
+                if data.get("action") != "mouse_move" and session_ref.driver_mode != "user":
                     session_ref.takeover()
                 action = data.get("action", "")
                 result = session_ref.user_action(action, **{

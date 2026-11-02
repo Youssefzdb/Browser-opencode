@@ -15,6 +15,7 @@ variant of click, which OpenCode clients commonly need):
   browser_click      {text} | {selector} | {x, y}
   browser_list_elements {}
   browser_click_xy   {x, y}
+  browser_mouse_move {x, y}  (visible cursor overlay in the preview)
   browser_wait       {seconds, text}
   browser_type       {field, text}
   browser_scroll     {direction, amount, selector}
@@ -74,6 +75,8 @@ TOOLS = [
     {"name": "browser_list_elements", "description": "List visible links, buttons and inputs with a selector per element. Call this BEFORE clicking, instead of guessing text or selectors from page text alone. Always runs, even while the user drives.",
      "inputSchema": {"type": "object", "properties": {}}},
     {"name": "browser_click_xy", "description": "Click by screenshot coordinates (1280x720 viewport) taken from the latest screenshot. Use only after browser_screenshot / preview, and prefer browser_list_elements + browser_click when a selector exists.",
+     "inputSchema": {"type": "object", "properties": {"x": {"type": "number"}, "y": {"type": "number"}}, "required": ["x", "y"]}},
+    {"name": "browser_mouse_move", "description": "Move the mouse to screenshot coordinates (1280x720) without clicking. The preview draws the mouse as a visible cursor overlay, so the user watching sees where the agent is pointing. Move before clicking when the target needs showing.",
      "inputSchema": {"type": "object", "properties": {"x": {"type": "number"}, "y": {"type": "number"}}, "required": ["x", "y"]}},
     {"name": "browser_wait", "description": "Wait up to 5 seconds, optionally until given text appears on the page. Use after navigation or a click before reading again.",
      "inputSchema": {"type": "object", "properties": {"seconds": {"type": "number"}, "text": {"type": "string"}}}},
@@ -142,6 +145,9 @@ class MCPBrowserServer:
         if name == "browser_click_xy":
             out = s.click_xy(args.get("x"), args.get("y"))
             return out if isinstance(out, str) else json.dumps(out)
+        if name == "browser_mouse_move":
+            out = s.mouse_move(args.get("x"), args.get("y"))
+            return out if isinstance(out, str) else json.dumps(out)
         if name == "browser_wait":
             return s.wait(seconds=args.get("seconds", 1), text=args.get("text", ""))
         if name == "browser_type":
@@ -176,7 +182,7 @@ class MCPBrowserServer:
             return {"jsonrpc": "2.0", "id": rid, "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "shadowcode-browser", "version": "0.2.0"},
+                "serverInfo": {"name": "shadowcode-browser", "version": "0.2.1"},
             }}
         if method in ("notifications/initialized", "notifications/cancelled"):
             return None

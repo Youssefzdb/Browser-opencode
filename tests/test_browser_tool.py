@@ -263,6 +263,47 @@ class TestAgentControl(unittest.TestCase):
             finally:
                 server.shutdown(); server.server_close()
 
+    def test_mouse_cursor_visible_in_preview_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            s = make_session(tmp)
+            s.open("https://example.com")
+            # No cursor before any move/click: preview shows nothing fake.
+            self.assertIsNone(s.mouse_x)
+            s.mouse_move(320, 240)
+            self.assertEqual((s.mouse_x, s.mouse_y), (320, 240))
+            self.assertIn("mouse_move", [c[0] for c in s._driver.calls])
+            server, url = start_preview(s, start_port=8797)
+            try:
+                state = json.loads(urllib.request.urlopen(url + "/state.json", timeout=5).read())
+                self.assertEqual(state["mouse_x"], 320)
+                self.assertEqual(state["mouse_y"], 240)
+                html = urllib.request.urlopen(url, timeout=5).read().decode()
+                self.assertIn('id="cursor"', html)
+                # Preview mouse moves track without flipping the driver
+                # and without flooding the watch log.
+                watch_before = len(s.watch_log)
+                req = urllib.request.Request(
+                    url + "/control", data=json.dumps({"action": "mouse_move", "x": 100, "y": 50}).encode(),
+                    headers={"Content-Type": "application/json"}, method="POST")
+                urllib.request.urlopen(req, timeout=5).read()
+                self.assertEqual(s.driver_mode, "agent")
+                self.assertEqual(len(s.watch_log), watch_before)
+                self.assertEqual((s.mouse_x, s.mouse_y), (100, 50))
+            finally:
+                server.shutdown(); server.server_close()
+
+    def test_mcp_mouse_move_tool(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            srv = MCPBrowserServer(tmp, fake=True)
+            resp = srv.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+            names = [t["name"] for t in resp["result"]["tools"]]
+            self.assertIn("browser_mouse_move", names)
+            resp = srv.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                               "params": {"name": "browser_mouse_move", "arguments": {"x": 10, "y": 20}}})
+            self.assertFalse(resp["result"]["isError"], resp)
+            self.assertIn("mouse moved", resp["result"]["content"][0]["text"])
+            srv.close()
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
